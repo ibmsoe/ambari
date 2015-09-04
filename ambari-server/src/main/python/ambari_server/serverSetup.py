@@ -24,6 +24,8 @@ import re
 import shutil
 import sys
 import subprocess
+import fileinput
+import multiprocessing
 
 from ambari_commons.exceptions import FatalException
 from ambari_commons.firewall import Firewall
@@ -1040,6 +1042,32 @@ def check_setup_already_done():
 
   return properties.get_property(JDK_NAME_PROPERTY) and properties.get_property(JDBC_DATABASE_PROPERTY)
 
+
+#
+# This fix solves ui issue that occurs if number of cores if more than 48.
+#
+def alterAmbariThreadProperties():
+  inputFile = '/etc/ambari-server/conf/ambari.properties'
+  checkStr1 = 'client.threadpool.size.max'
+  checkStr2 = 'agent.threadpool.size.max'
+  checkStr3 = 'view.extraction.threadpool.size.max'
+  checkStr4 = 'server.execution.scheduler.maxThreads'
+  lines = []
+  with open(inputFile) as infile:
+    for line in infile:
+      if line.find(checkStr1) != -1:
+        line = re.sub('client.threadpool.size.max=(.*)','client.threadpool.size.max=64\n', line.rstrip())
+      elif line.find(checkStr2) != -1:
+        line = re.sub('agent.threadpool.size.max=(.*)','agent.threadpool.size.max=64\n', line.rstrip())
+      elif line.find(checkStr3) != -1:
+        line = re.sub('view.extraction.threadpool.size.max=(.*)','view.extraction.threadpool.size.max=64\n', line.rstrip())
+      elif line.find(checkStr4) != -1:
+        line = re.sub('server.execution.scheduler.maxThreads=(.*)','server.execution.scheduler.maxThreads=10\n', line.rstrip())
+      lines.append(line)
+  with open(inputFile, 'w') as outfile:
+    for line in lines:
+      outfile.write(line)
+
 #
 # Setup the Ambari Server.
 #
@@ -1056,6 +1084,12 @@ def setup(options):
   if not is_root():
     err = configDefaults.MESSAGE_ERROR_SETUP_NOT_ROOT
     raise FatalException(4, err)
+
+  # Alter max thread counts in ambari.properties file if number of cores is greater than 48.
+  cores = multiprocessing.cpu_count()
+  permittedcores = 48
+  if cores > permittedcores:
+    alterAmbariThreadProperties()
 
   # proceed jdbc properties if they were set
   if _check_jdbc_options(options):
